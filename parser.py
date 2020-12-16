@@ -2,112 +2,176 @@ from urllib.request import Request, urlopen
 from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 import pandas as pd
-def quilet_parse(url):
-    req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    res = urlopen(req).read()
-    bs = BeautifulSoup(res, 'html.parser')
+import re
+import asyncio
+import string
+from time import time
+from urllib.error import HTTPError
+
+def str_clean(state):
+    return state.translate(str.maketrans('', '', string.punctuation)).translate(str.maketrans('', '', string.digits)).replace(
+        "  ", " ").strip()
+def stop_words(state):
+    stop_w = ["is","the","a","an","and","are","was","were","to","as","in","of","by","at"]
+    comp = re.compile(r"\b|\b".join(stop_w))
+    white = re.compile(r"\s{2,}")
+    return white.sub(" ",comp.sub("",state)).strip()
+async def main(urls,state,verbose =True,time_=False):
+    if time_:
+        s_t1 = time()
+    c_state = str_clean(state)
+    c_state = list(set(stop_words(c_state).split(" ")))
+    futures = [asyncio.ensure_future(quilet_parse(url,c_state,time_)) for url in urls]
+    result = await asyncio.gather(*futures)
+    if time_:
+        print("problem sol 얻어오는 시간",(time()-s_t1))
+        s_t1 = time()
+    df = pd.concat(result, axis=0)
+    q_max = df[2].max()
+    s_max = df[3].max()
+    a_max = max(q_max,s_max)
+    df = df[(df[2] == a_max) | (df[3] == a_max)][["prob", "sol"]]
+    split_num = 130
+    if time_:
+        print("최종 DF 처리하는 시간", (time() - s_t1))
+    if verbose:
+        if q_max >= s_max:
+            print()
+            print()
+            print("Problem 으로 찾음")
+        if q_max < s_max:
+            print()
+            print()
+            print("Solution 으로 찾음")
+
+        for n,d in df.iterrows():
+            print()
+            print("Problem -------------------------------------------------")
+            for i in d["prob"].split(". "):
+                if len(i) < split_num:
+                    print(i, end=".")
+                    print()
+                else:
+                    for _ in range(split_num,len(i),split_num):
+                        print(i[(_-split_num):_])
+                    print(i[_:], end=".")
+            print()
+            print("Solution -------------------------------------------------")
+            for i in d["sol"].split(". "):
+                if len(i) < split_num:
+                    print(i, end=".")
+                    print()
+                else:
+                    for _ in range(split_num,len(i),split_num):
+                        print(i[(_-split_num):_])
+                    print(i[_:], end=".")
+            print()
+    return True
+
+def prob_sol_df(bs,state):
     prob = []
     sol = []
     n = 0
-    for i in bs.findAll('span', attrs={'class': 'TermText notranslate lang-en'},recursive=True):
-        if n%2 ==0:
+    a_p = []
+    a_s = []
+    for i in bs.findAll('span', attrs={'class': 'TermText notranslate lang-en'}, recursive=True):
+        if n % 2 == 0:
+            a_p.append(word_count(state, str_clean(i.text)))
             prob.append(i.text)
         else:
+            a_s.append(word_count(state, str_clean(i.text)))
             sol.append(i.text)
-        n+=1
-    return pd.DataFrame([prob,sol]).T.rename(columns = {0:"prob",1:"sol"})
+        n += 1
+    df = pd.DataFrame([prob, sol, a_p, a_s]).T.rename(columns={0: "prob", 1: "sol"})
+    return df
+async def quilet_parse(url,state,time_):
+    req = Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+        "lang": "ko_KR", "disable-gpu": True})
+    if time_:
+        s_t1 = time()
+    try:
+        response = await asyncio.get_event_loop().run_in_executor(None, urlopen, req)
+    except HTTPError:
+        return
+    page = await asyncio.get_event_loop().run_in_executor(None, response.read)
+    bs = await asyncio.get_event_loop().run_in_executor(None, BeautifulSoup,page, 'html.parser')
+    df = await asyncio.get_event_loop().run_in_executor(None, prob_sol_df,bs,state)
+    if time_:
+        print("개별 parser 처리하는 시간", (time() - s_t1))
+    return df[(df[2] ==df[2].max()) | (df[3] ==df[3].max())]
 
-def word_count(data,Word):
-    n = 0
-    for d in Word:
-        if d in data:
-            n+=1
-    return n
 
-def get_prob_answer(url,state):
-    plus = state
-    Word = plus.split(" ")
-    for i in Word:
-        try:
-            int(i)
-            Word.remove(i)
-        except:
-            pass
-    df = quilet_parse(url)
-    pro = df.apply(lambda x: x.apply(lambda x: word_count(x,Word)))["prob"]
-    sol = df.apply(lambda x: x.apply(lambda x: word_count(x,Word)))["sol"]
-    pro_idx = pro[pro == pro.max()].index.values
-    sol_idx = sol[sol == sol.max()].index.values
-    def pprint(df,idx):
-        for p_i in idx:
-            print("Problem -------------------------------------------------")
-            for i in df.loc[p_i]["prob"].split(". "):
-                print(i, end=".")
-                print()
-            print("Solution -------------------------------------------------")
-            for i in df.loc[p_i]["sol"].split(". "):
-                print(i, end=".")
-                print()
-    if len(pro_idx) <= 2:
-        pprint(df, pro_idx)
-        return True
-    else:
-        pprint(df, pro_idx)
-        print("Solution으로 찾기 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-        pprint(df, sol_idx)
-        return False
-def google_search(state,get_url = False):
+def word_count(state,qustion):
+    return len([d for d in state if d in qustion])
+
+def google_search(state,get_url = False,time_ = False):
+    if time_:
+        s_t1 = time()
+    c_state = stop_words(str_clean(state))
+    c_state = re.compile(r"\b\w{1}\b").sub("", c_state)
+    c_state = re.compile(r"\s{2,}").sub(" ",c_state)
     baseUrl = 'https://www.google.com/search?q='
-    plusUrl = "site:quizlet.com" +" "+ state
+    plusUrl = "site:quizlet.com" +" "+ c_state
     url = baseUrl + quote_plus(plusUrl)
-    req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    req = Request(url, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',"lang":"ko_KR","disable-gpu":True})
     res = urlopen(req).read()
     bs = BeautifulSoup(res, 'html.parser')
-    b = bs.findAll('div', attrs={'class': 'kCrYT'},recursive=True)
+    b = bs.findAll('a', recursive=True)
     links = []
     for b_ in b:
-        for a in b_.find_all('a', href=True):
-            if "https://quizlet.com/" in a["href"]:
-                try:
-                    link = a["href"].split("/url?q=")[1]
-                except:
-                    link = a["href"].split("/url?q=")[0]
-                links.append(link)
-                if get_url:
-                    continue
-                find_ =get_prob_answer(link, state)
-                if find_:
-                    return True
+        try:
+            if re.compile("^https://quizlet.com/").search(b_['href']) is not None:
+                links.append(b_['href'])
+        except:
+            pass
+    if time_:
+        print("구글 링크 처리하는 시간", (time() - s_t1))
     if get_url:
         return links
-    else:
-        return False
+
 
 if __name__ == "__main__":
     k = "a"
     state = None
+    start = 0
+    n = 2
+    end = n
+    google_pass = False
+    verbose = True
+    time_ = False
     while k != "q":
         if state is None:
             state = input("검색하고자하는 질문 입력하세요 : ")
-        google_search(state)
+        elif state == "need short":
+            state = input("검색하고자하는 질문을 좀 더 짧게 입력하세요 : ")
+        if not google_pass:
+            links = google_search(state, get_url=True,time_ = time_)
+        #print(links)
+        if len(links) >=1:
+            if len(links) > start:
+                if len(links) > end:
+                    asyncio.get_event_loop().run_until_complete(main(links[start:end], state,verbose,time_))
+                else:
+                    asyncio.get_event_loop().run_until_complete(main(links[start:], state,verbose,time_))
+            else:
+                asyncio.get_event_loop().run_until_complete(main(links, state,verbose,time_))
+        else:
+            state = "need short"
+            continue
         k = input("Press q to quit 다른 결과는 else를 입력하세요 :")
-        if k == "else":
-            k2 = "a"
-            n = 0
-            while k2 != "q":
-                n +=1
-                link = google_search(state, get_url=True)
-                try:
-                    get_prob_answer(link[n], state)
-                    k2 = input("Press q to quit or 다른 결과는 아무키나 입력하세요 :")
-                except:
-                    break
+        if k =="else":
+            start += n
+            end += n
+            google_pass = True
+            continue
         if len(k) >=10:
             state = k
         else:
             state = None
-    #url = input("quizlet URL 입력하세요 : ")
-    #get_prob_answer(url,state)
+        start = 0
+        end = n
+        google_pass = False
 
 else:
     state = "Why are the following “effects” considered efficient market anomalies? Are there rational explanations for these effec"
