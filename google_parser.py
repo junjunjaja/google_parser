@@ -66,7 +66,7 @@ async def main(urls,state,verbose =True,time_=False):
                         print(i[(_-split_num):_])
                     print(i[_:], end=".")
             print()
-    return True
+    return df
 
 def prob_sol_df(bs,state):
     prob = []
@@ -135,11 +135,11 @@ if __name__ == "__main__":
     k = "a"
     state = None
     start = 0
-    n = 2
+    n = 6
     end = n
     google_pass = False
     verbose = True
-    time_ = False
+    time_ = True
     while k != "q":
         if state is None:
             state = input("검색하고자하는 질문 입력하세요 : ")
@@ -161,25 +161,21 @@ if __name__ == "__main__":
             continue
         k = input("Press q to quit 다른 결과는 else를 입력하세요 :")
         if k =="else":
+            print()
+            print("기존 질문과 같은 항목 검색")
+            print()
             start += n
             end += n
             google_pass = True
             continue
         if len(k) >=10:
             state = k
+            print()
+            print(f"새로운 질문 {state[:20]} ~ 으로 검색")
+            print()
+
         else:
             state = None
         start = 0
         end = n
         google_pass = False
-
-else:
-    state = "Why are the following “effects” considered efficient market anomalies? Are there rational explanations for these effec"
-    l = google_search(state,get_url=True)
-    url = l[1]
-    get_prob_answer(url, state)
-
-    #url = "https://quizlet.com/120507818/portfolio-analysis-final-1-flash-cards/"
-    url = "https://quizlet.com/268677313/chapter-7-capital-asset-pricing-and-arbitrage-pricing-theory-flash-cards/"
-    url = l[1]
-    get_prob_answer(url, state)

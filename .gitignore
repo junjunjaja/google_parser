@@ -1,6 +1,8 @@
 # : comments
 !*.py
 
+build/
+dist/
 *.ini
 *.xlsx
 *.ipynb
